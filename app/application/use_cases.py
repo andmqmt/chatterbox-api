@@ -31,15 +31,21 @@ class ProcessarMensagemUseCase:
         self.provedor_ia = provedor_ia
 
     async def executar(self, conversa_id: str, conteudo_usuario: str, teoria: str = None):
+        print(f"[USE_CASE] Iniciando processamento - Conversa: {conversa_id}, Teoria: {teoria[:50] if teoria else 'None'}...")
         conversa = await self.repositorio.obter_por_id(conversa_id)
         if not conversa:
+            print(f"[USE_CASE] ERRO: Conversa {conversa_id} não encontrada")
             raise ValueError(f"Conversa {conversa_id} não encontrada")
+
+        print(f"[USE_CASE] Conversa encontrada. Mensagens existentes: {len(conversa.mensagens)}")
 
         if teoria and teoria.strip():
             conversa.teoria = teoria.strip()
             await self.repositorio.atualizar(conversa)
+            print(f"[USE_CASE] Teoria atualizada na conversa")
 
         teoria_ativa = conversa.teoria if conversa.teoria and conversa.teoria.strip() else (teoria.strip() if teoria and teoria.strip() else "Convencer o usuário sobre uma teoria alternativa.")
+        print(f"[USE_CASE] Teoria ativa: {teoria_ativa[:100]}...")
 
         mensagem_usuario = Mensagem(
             conteudo=conteudo_usuario,
@@ -47,16 +53,28 @@ class ProcessarMensagemUseCase:
             id=str(uuid.uuid4())
         )
         conversa.adicionar_mensagem(mensagem_usuario)
+        print(f"[USE_CASE] Mensagem do usuário adicionada ao histórico")
 
         historico = [
             {"role": m.remetente.value, "content": m.conteudo}
             for m in conversa.mensagens
         ]
+        print(f"[USE_CASE] Histórico preparado com {len(historico)} mensagens")
 
+        print(f"[USE_CASE] Iniciando geração de resposta da IA...")
         resposta_completa = ""
-        async for chunk in self.provedor_ia.gerar_resposta_stream(historico, teoria_ativa):
-            resposta_completa += chunk
-            yield chunk
+        chunk_count = 0
+        try:
+            async for chunk in self.provedor_ia.gerar_resposta_stream(historico, teoria_ativa):
+                resposta_completa += chunk
+                chunk_count += 1
+                yield chunk
+            print(f"[USE_CASE] Resposta completa gerada. Total de chunks: {chunk_count}, Tamanho: {len(resposta_completa)} caracteres")
+        except Exception as e:
+            import traceback
+            print(f"[USE_CASE] ERRO ao gerar resposta: {e}")
+            print(f"[USE_CASE] Traceback: {traceback.format_exc()}")
+            raise
 
         mensagem_ia = Mensagem(
             conteudo=resposta_completa,
@@ -65,6 +83,7 @@ class ProcessarMensagemUseCase:
         )
         conversa.adicionar_mensagem(mensagem_ia)
         await self.repositorio.atualizar(conversa)
+        print(f"[USE_CASE] Mensagem da IA salva no banco de dados")
 
 
 class ListarConversasUseCase:
