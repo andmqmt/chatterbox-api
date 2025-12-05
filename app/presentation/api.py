@@ -2,6 +2,7 @@ from fastapi import FastAPI, WebSocket, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from pydantic import BaseModel
+from typing import Optional
 import os
 import json
 
@@ -40,7 +41,7 @@ async def obter_repositorio() -> RepositorioConversa:
 
 
 class CriarConversaRequest(BaseModel):
-    teoria: str = ""
+    teoria: Optional[str] = ""
 
 
 @app.get("/")
@@ -70,7 +71,8 @@ async def health_check():
 @app.post("/conversas")
 async def criar_conversa(request: CriarConversaRequest = CriarConversaRequest(), repositorio: RepositorioConversa = Depends(obter_repositorio)):
     use_case = CriarConversaUseCase(repositorio)
-    conversa = await use_case.executar(request.teoria)
+    teoria = request.teoria if request.teoria else ""
+    conversa = await use_case.executar(teoria)
     return conversa.para_dict()
 
 
