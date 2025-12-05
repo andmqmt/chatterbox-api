@@ -3,6 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from pydantic import BaseModel
 from typing import Optional
+from starlette.websockets import WebSocketDisconnect
 import os
 import json
 
@@ -120,53 +121,84 @@ async def websocket_endpoint(websocket: WebSocket, conversa_id: str):
 
     try:
         while True:
-            print(f"[WS] Aguardando mensagem na conversa: {conversa_id}")
-            dados = await websocket.receive_text()
-            print(f"[WS] Mensagem recebida: {dados[:100]}...")
-            mensagem_dados = json.loads(dados)
-            conteudo_usuario = mensagem_dados.get("mensagem") or mensagem_dados.get("conteudo")
-            teoria = mensagem_dados.get("teoria")
-
-            print(f"[WS] Conteúdo: {conteudo_usuario[:50]}... | Teoria: {teoria[:50] if teoria else 'None'}...")
-
-            if not conteudo_usuario:
-                print("[WS] ERRO: Mensagem vazia")
-                await websocket.send_text(json.dumps({"tipo": "erro", "mensagem": "Mensagem vazia"}))
-                continue
-
             try:
-                print(f"[WS] Iniciando processamento da mensagem...")
-                chunk_count = 0
-                async for chunk in use_case.executar(conversa_id, conteudo_usuario, teoria):
-                    chunk_count += 1
-                    await websocket.send_text(json.dumps({
-                        "tipo": "resposta_ia",
-                        "conteudo": chunk
-                    }))
-                    if chunk_count % 10 == 0:
-                        print(f"[WS] Enviados {chunk_count} chunks...")
+                print(f"[WS] Aguardando mensagem na conversa: {conversa_id}")
+                dados = await websocket.receive_text()
+                print(f"[WS] Mensagem recebida: {dados[:100]}...")
+                mensagem_dados = json.loads(dados)
+                conteudo_usuario = mensagem_dados.get("mensagem") or mensagem_dados.get("conteudo")
+                teoria = mensagem_dados.get("teoria")
 
-                print(f"[WS] Processamento completo. Total de chunks: {chunk_count}")
-                await websocket.send_text(json.dumps({"tipo": "fim_resposta"}))
-                print(f"[WS] Sinal de fim enviado")
-            except ValueError as e:
-                import traceback
-                print(f"[WS] ERROR ValueError: {e}")
-                print(f"[WS] Traceback: {traceback.format_exc()}")
-                await websocket.send_text(json.dumps({"tipo": "erro", "mensagem": str(e)}))
-            except Exception as e:
-                import traceback
-                print(f"[WS] ERROR Exception: {e}")
-                print(f"[WS] Traceback: {traceback.format_exc()}")
-                await websocket.send_text(json.dumps({"tipo": "erro", "mensagem": f"Erro interno: {str(e)}"}))
+                print(f"[WS] Conteúdo: {conteudo_usuario[:50]}... | Teoria: {teoria[:50] if teoria else 'None'}...")
 
+                if not conteudo_usuario:
+                    print("[WS] ERRO: Mensagem vazia")
+                    await websocket.send_text(json.dumps({"tipo": "erro", "mensagem": "Mensagem vazia"}))
+                    continue
+
+                try:
+                    print(f"[WS] Iniciando processamento da mensagem...")
+                    chunk_count = 0
+                    async for chunk in use_case.executar(conversa_id, conteudo_usuario, teoria):
+                        chunk_count += 1
+                        try:
+                            await websocket.send_text(json.dumps({
+                                "tipo": "resposta_ia",
+                                "conteudo": chunk
+                            }))
+                        except (WebSocketDisconnect, RuntimeError):
+                            print(f"[WS] Cliente desconectado durante envio de chunks")
+                            break
+                        if chunk_count % 10 == 0:
+                            print(f"[WS] Enviados {chunk_count} chunks...")
+
+                    print(f"[WS] Processamento completo. Total de chunks: {chunk_count}")
+                    try:
+                        await websocket.send_text(json.dumps({"tipo": "fim_resposta"}))
+                        print(f"[WS] Sinal de fim enviado")
+                    except (WebSocketDisconnect, RuntimeError):
+                        print(f"[WS] Cliente desconectado antes de enviar fim")
+                except ValueError as e:
+                    import traceback
+                    print(f"[WS] ERROR ValueError: {e}")
+                    print(f"[WS] Traceback: {traceback.format_exc()}")
+                    try:
+                        await websocket.send_text(json.dumps({"tipo": "erro", "mensagem": str(e)}))
+                    except (WebSocketDisconnect, RuntimeError):
+                        print(f"[WS] Cliente desconectado durante envio de erro")
+                except Exception as e:
+                    import traceback
+                    print(f"[WS] ERROR Exception: {e}")
+                    print(f"[WS] Traceback: {traceback.format_exc()}")
+                    try:
+                        await websocket.send_text(json.dumps({"tipo": "erro", "mensagem": f"Erro interno: {str(e)}"}))
+                    except (WebSocketDisconnect, RuntimeError):
+                        print(f"[WS] Cliente desconectado durante envio de erro")
+            except WebSocketDisconnect:
+                print(f"[WS] Cliente desconectado normalmente da conversa: {conversa_id}")
+                break
+            except RuntimeError as e:
+                if "websocket.close" in str(e).lower() or "after sending" in str(e).lower():
+                    print(f"[WS] Conexão já fechada para conversa: {conversa_id}")
+                    break
+                raise
+
+    except WebSocketDisconnect:
+        print(f"[WS] Cliente desconectado da conversa: {conversa_id}")
     except Exception as e:
         import traceback
-        print(f"[WS] ERROR na conexão WebSocket: {e}")
-        print(f"[WS] Traceback: {traceback.format_exc()}")
+        if "websocket.close" not in str(e).lower() and "after sending" not in str(e).lower():
+            print(f"[WS] ERROR na conexão WebSocket: {e}")
+            print(f"[WS] Traceback: {traceback.format_exc()}")
+        else:
+            print(f"[WS] Conexão fechada para conversa: {conversa_id}")
     finally:
-        print(f"[WS] Fechando conexão WebSocket para conversa: {conversa_id}")
+        print(f"[WS] Finalizando conexão WebSocket para conversa: {conversa_id}")
         try:
             await websocket.close()
-        except Exception as e:
-            print(f"[WS] ERRO ao fechar conexão: {e}")
+        except (WebSocketDisconnect, RuntimeError, AttributeError) as e:
+            error_msg = str(e).lower()
+            if "websocket.close" in error_msg or "after sending" in error_msg or "already closed" in error_msg:
+                print(f"[WS] Conexão já estava fechada")
+            else:
+                print(f"[WS] Erro ao fechar conexão: {type(e).__name__}: {e}")
