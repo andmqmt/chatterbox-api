@@ -8,8 +8,8 @@ class CriarConversaUseCase:
     def __init__(self, repositorio: RepositorioConversa):
         self.repositorio = repositorio
 
-    async def executar(self) -> Conversa:
-        conversa = Conversa(id=str(uuid.uuid4()))
+    async def executar(self, teoria: str = "") -> Conversa:
+        conversa = Conversa(id=str(uuid.uuid4()), teoria=teoria)
         await self.repositorio.criar(conversa)
         return conversa
 
@@ -30,10 +30,16 @@ class ProcessarMensagemUseCase:
         self.repositorio = repositorio
         self.provedor_ia = provedor_ia
 
-    async def executar(self, conversa_id: str, conteudo_usuario: str):
+    async def executar(self, conversa_id: str, conteudo_usuario: str, teoria: str = None):
         conversa = await self.repositorio.obter_por_id(conversa_id)
         if not conversa:
             raise ValueError(f"Conversa {conversa_id} não encontrada")
+
+        if teoria and teoria.strip():
+            conversa.teoria = teoria.strip()
+            await self.repositorio.atualizar(conversa)
+
+        teoria_ativa = conversa.teoria if conversa.teoria and conversa.teoria.strip() else (teoria.strip() if teoria and teoria.strip() else "Convencer o usuário sobre uma teoria alternativa.")
 
         mensagem_usuario = Mensagem(
             conteudo=conteudo_usuario,
@@ -48,7 +54,7 @@ class ProcessarMensagemUseCase:
         ]
 
         resposta_completa = ""
-        async for chunk in self.provedor_ia.gerar_resposta_stream(historico):
+        async for chunk in self.provedor_ia.gerar_resposta_stream(historico, teoria_ativa):
             resposta_completa += chunk
             yield chunk
 

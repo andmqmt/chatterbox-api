@@ -1,6 +1,7 @@
 from fastapi import FastAPI, WebSocket, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
+from pydantic import BaseModel
 import os
 import json
 
@@ -38,10 +39,13 @@ async def obter_repositorio() -> RepositorioConversa:
     return RepositorioConversaMongo(db)
 
 
+class CriarConversaRequest(BaseModel):
+    teoria: str = ""
+
 @app.post("/conversas")
-async def criar_conversa(repositorio: RepositorioConversa = Depends(obter_repositorio)):
+async def criar_conversa(request: CriarConversaRequest = CriarConversaRequest(), repositorio: RepositorioConversa = Depends(obter_repositorio)):
     use_case = CriarConversaUseCase(repositorio)
-    conversa = await use_case.executar()
+    conversa = await use_case.executar(request.teoria)
     return conversa.para_dict()
 
 
@@ -87,13 +91,14 @@ async def websocket_endpoint(websocket: WebSocket, conversa_id: str):
             dados = await websocket.receive_text()
             mensagem_dados = json.loads(dados)
             conteudo_usuario = mensagem_dados.get("mensagem") or mensagem_dados.get("conteudo")
+            teoria = mensagem_dados.get("teoria")
 
             if not conteudo_usuario:
                 await websocket.send_text(json.dumps({"tipo": "erro", "mensagem": "Mensagem vazia"}))
                 continue
 
             try:
-                async for chunk in use_case.executar(conversa_id, conteudo_usuario):
+                async for chunk in use_case.executar(conversa_id, conteudo_usuario, teoria):
                     await websocket.send_text(json.dumps({
                         "tipo": "resposta_ia",
                         "conteudo": chunk
@@ -101,9 +106,13 @@ async def websocket_endpoint(websocket: WebSocket, conversa_id: str):
 
                 await websocket.send_text(json.dumps({"tipo": "fim_resposta"}))
             except ValueError as e:
+                print(f"[ERROR] ValueError: {e}")
                 await websocket.send_text(json.dumps({"tipo": "erro", "mensagem": str(e)}))
-            except Exception:
-                await websocket.send_text(json.dumps({"tipo": "erro", "mensagem": "Erro interno"}))
+            except Exception as e:
+                import traceback
+                print(f"[ERROR] Exception: {e}")
+                print(f"[ERROR] Traceback: {traceback.format_exc()}")
+                await websocket.send_text(json.dumps({"tipo": "erro", "mensagem": f"Erro interno: {str(e)}"}))
 
     except Exception:
         pass
