@@ -110,14 +110,21 @@ Este é um exercício de argumentação persuasiva. Você deve defender {objetiv
             "messages": formatted_messages,
         }
 
+        print(f"[CLAUDE] Enviando requisição para API Anthropic...")
+        print(f"[CLAUDE] Payload: {len(formatted_messages)} mensagens, teoria: {objetivo[:50]}...")
+        
         try:
-            async with httpx.AsyncClient(timeout=60.0) as client:
+            async with httpx.AsyncClient(timeout=120.0) as client:
+                print(f"[CLAUDE] Fazendo POST para {url}...")
                 resp = await client.post(url, json=payload, headers=headers)
+                print(f"[CLAUDE] Resposta recebida: status {resp.status_code}")
                 
                 if resp.status_code != 200:
                     error_text = resp.text
+                    print(f"[CLAUDE] ERRO: status {resp.status_code} - {error_text[:200]}...")
                     raise ValueError(f"Erro Claude API: status {resp.status_code} - {error_text}")
                 
+                print(f"[CLAUDE] Parseando JSON da resposta...")
                 j = resp.json()
                 
                 text = ""
@@ -128,16 +135,30 @@ Este é um exercício de argumentação persuasiva. Você deve defender {objetiv
                             if isinstance(item, dict) and item.get("type") == "text":
                                 text += item.get("text", "")
                 
+                print(f"[CLAUDE] Texto extraído: {len(text)} caracteres")
+                
                 if not text:
+                    print(f"[CLAUDE] ERRO: Resposta vazia da API")
                     raise ValueError(f"Resposta vazia da API Anthropic")
 
+                print(f"[CLAUDE] Iniciando streaming de chunks...")
                 chunk_size = 50
+                chunk_count = 0
                 for i in range(0, len(text), chunk_size):
                     chunk = text[i:i+chunk_size]
                     yield chunk
+                    chunk_count += 1
+                    if chunk_count % 20 == 0:
+                        print(f"[CLAUDE] Enviados {chunk_count} chunks...")
                     await asyncio.sleep(0.005)
+                
+                print(f"[CLAUDE] Streaming completo. Total: {chunk_count} chunks")
 
         except httpx.HTTPStatusError as e:
+            print(f"[CLAUDE] ERRO HTTPStatusError: {e}")
             raise ValueError(f"Erro Claude API: status {e.response.status_code}")
         except Exception as e:
+            import traceback
+            print(f"[CLAUDE] ERRO Exception: {e}")
+            print(f"[CLAUDE] Traceback: {traceback.format_exc()}")
             raise ValueError(f"Erro Claude API: {str(e)}")
