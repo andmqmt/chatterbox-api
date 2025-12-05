@@ -33,6 +33,7 @@ class RepositorioConversaMongo(RepositorioConversa):
         documento = {
             "_id": conversa.id,
             "mensagens": [],
+            "teoria": conversa.teoria,
             "criada_em": conversa.criada_em,
             "atualizada_em": conversa.atualizada_em
         }
@@ -69,6 +70,7 @@ class RepositorioConversaMongo(RepositorioConversa):
         return Conversa(
             id=documento["_id"],
             mensagens=mensagens,
+            teoria=documento.get("teoria", ""),
             criada_em=documento["criada_em"],
             atualizada_em=documento["atualizada_em"]
         )
