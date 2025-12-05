@@ -29,6 +29,7 @@ class Mensagem:
 class Conversa:
     id: str
     mensagens: List[Mensagem] = field(default_factory=list)
+    teoria: str = ""
     criada_em: datetime = field(default_factory=datetime.now)
     atualizada_em: datetime = field(default_factory=datetime.now)
 
@@ -40,6 +41,7 @@ class Conversa:
         return {
             "id": self.id,
             "mensagens": [m.para_dict() for m in self.mensagens],
+            "teoria": self.teoria,
             "criada_em": self.criada_em.isoformat(),
             "atualizada_em": self.atualizada_em.isoformat()
         }
