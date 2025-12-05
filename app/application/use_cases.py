@@ -30,6 +30,38 @@ class ProcessarMensagemUseCase:
         self.repositorio = repositorio
         self.provedor_ia = provedor_ia
 
+    def _detectar_teoria_na_mensagem(self, mensagem: str) -> str | None:
+        import re
+        mensagem_original = mensagem.strip()
+        mensagem_lower = mensagem_original.lower()
+        
+        padroes_pergunta = [
+            r'^(os|as|o|a)\s+(.+?)\s+(existe|existem|é real|são reais|é verdade|são verdade|são|é)\??$',
+            r'^(.+?)\s+(existe|existem|é real|são reais|é verdade|são verdade|são|é)\??$',
+            r'(.+?)\s+(existe|existem|é real|são reais|é verdade|são verdade)\??',
+        ]
+        
+        for padrao in padroes_pergunta:
+            match = re.search(padrao, mensagem_lower, re.IGNORECASE)
+            if match:
+                grupos = match.groups()
+                teoria_detectada = None
+                
+                if len(grupos) >= 2:
+                    if grupos[0] in ['os', 'as', 'o', 'a']:
+                        teoria_detectada = grupos[1]
+                    else:
+                        teoria_detectada = grupos[0]
+                
+                if teoria_detectada:
+                    teoria_detectada = teoria_detectada.strip()
+                    if len(teoria_detectada) > 2 and len(teoria_detectada) < 100:
+                        teoria_formatada = teoria_detectada
+                        if teoria_formatada:
+                            return f"Convencer o usuário que {teoria_formatada} existe/é real."
+        
+        return None
+
     async def executar(self, conversa_id: str, conteudo_usuario: str, teoria: str = None):
         print(f"[USE_CASE] Iniciando processamento - Conversa: {conversa_id}, Teoria: {teoria[:50] if teoria else 'None'}...")
         conversa = await self.repositorio.obter_por_id(conversa_id)
@@ -39,7 +71,12 @@ class ProcessarMensagemUseCase:
 
         print(f"[USE_CASE] Conversa encontrada. Mensagens existentes: {len(conversa.mensagens)}")
 
-        if teoria and teoria.strip():
+        teoria_detectada = self._detectar_teoria_na_mensagem(conteudo_usuario)
+        if teoria_detectada:
+            print(f"[USE_CASE] Teoria detectada na mensagem: {teoria_detectada}")
+            conversa.teoria = teoria_detectada
+            await self.repositorio.atualizar(conversa)
+        elif teoria and teoria.strip():
             conversa.teoria = teoria.strip()
             await self.repositorio.atualizar(conversa)
             print(f"[USE_CASE] Teoria atualizada na conversa")
